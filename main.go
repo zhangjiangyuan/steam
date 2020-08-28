@@ -15,11 +15,66 @@ import (
 )
 
 var (
-	low   float64 = 486
-	tHour *time.Ticker
+	low float64 = 486
 )
 
 func main() {
+	startC := make(chan int)
+	hourC := make(chan int)
+	go clock(startC, hourC)
+
+	<-startC
+
+	data := make(map[string]string)
+	i := 1
+
+	f, index := newXlsx()
+
+	for {
+		sign := <-hourC
+		if sign == 2 {
+			i = 1
+			f, index = newXlsx()
+		}
+		t := time.Now().Format("2006-01-02 15:04:05")
+		p := getPrice()
+		data["time"] = t
+		data["price"] = p
+		fmt.Println(t + "\t" + p)
+
+		price, err := strconv.ParseFloat(p, 64)
+
+		if err != nil {
+			fmt.Println(err)
+		} else if price <= low {
+			sendToMe(p)
+		}
+		saveXlsx(f, index, i, data)
+		i++
+	}
+
+}
+
+func clock(startC, hourC chan int) {
+	tSec := time.NewTicker(1 * time.Second)
+	running := false
+	for {
+		t := <-tSec.C
+		if !running && t.Second()%2 == 0 {
+			startC <- 1
+			running = true
+		}
+
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+			hourC <- 2
+		} else if t.Minute() == 0 && t.Second() == 0 {
+			hourC <- 1
+		}
+	}
+
+}
+
+func newXlsx() (*excelize.File, int) {
 	f := excelize.NewFile()
 	// Create a new sheet.
 	runtime := time.Now().Format("20060102_150405")
@@ -31,45 +86,7 @@ func main() {
 
 	f.Path = fmt.Sprintf("static%s%s.xlsx", string(os.PathSeparator), runtime)
 	index := f.NewSheet("Sheet1")
-
-	tSec := time.NewTicker(1 * time.Second)
-
-	i := 1
-
-	data := make(map[string]string)
-
-	for {
-		sec := <-tSec.C
-		if sec.Minute() == 0 && sec.Second() == 0 {
-			tSec.Stop()
-			tHour = time.NewTicker(1 * time.Hour)
-			break
-		}
-	}
-
-	for {
-		select {
-
-		case <-tHour.C:
-			t := time.Now().Format("2006-01-02 15:04:05")
-			p := getPrice()
-			data["time"] = t
-			data["price"] = p
-			fmt.Println(t + "\t" + p)
-
-			price, err := strconv.ParseFloat(p, 64)
-
-			if err != nil {
-				fmt.Println(err)
-			} else if price <= low {
-				sendToMe(p)
-			}
-			saveXlsx(f, index, i, data)
-			i++
-		}
-
-	}
-
+	return f, index
 }
 
 func saveXlsx(f *excelize.File, index, i int, data map[string]string) {
